@@ -1,0 +1,5 @@
+.venv
+.idea
+.env
+proxies.json
+testing.py
