@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-import json
 import os
-from typing import TypeVar, Any, Literal
+from typing import TypeVar, Any, Literal, Awaitable
 
 from TikTokLive.client.errors import UserOfflineError
 from TikTokLive.client.web.web_settings import WebDefaults
-from TikTokLive.events import Event, DisconnectEvent
+from TikTokLive.events import Event, DisconnectEvent, LiveEndEvent
 from TikTokLive.events.base_event import BaseEvent
 from betterproto import Casing
+from httpx._client import ClientState
 from pydantic import BaseModel, Field, ConfigDict
-from starlette.websockets import WebSocket, WebSocketState
+from starlette.websockets import WebSocket
 
 from app.core.tiktok.client import ChatSocketClient
 
@@ -42,10 +42,18 @@ class ControlEvent(RoomMessage):
     name: Literal["join", "leave", "end"]
 
 
+class OperationEvent(RoomMessage):
+    """Events related to user-initiated operations"""
+
+    type: str = "operation_event"
+    name: str
+
+
 class RoomClient(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     ws: WebSocket
+    room: TikTokRoom
     id: str = Field(default_factory=lambda: os.urandom(16).hex())
     unique_id: str
 
@@ -57,7 +65,11 @@ class TikTokRoom:
 
     """
 
-    def __init__(self, unique_id: str, connection: ChatSocketClient):
+    def __init__(
+            self,
+            unique_id: str,
+            connection: ChatSocketClient
+    ):
         super().__init__()
         self._unique_id: str = unique_id
         self._connection: ChatSocketClient = connection
@@ -76,6 +88,17 @@ class TikTokRoom:
         return self._unique_id
 
     @property
+    def room_info(self) -> dict:
+        """
+        Return the room info
+
+        :return: The room info
+
+        """
+
+        return self._connection.room_info
+
+    @property
     def _clients(self) -> dict[str, RoomClient]:
         """
         Return a copy of the clients safe to iterate over
@@ -84,6 +107,28 @@ class TikTokRoom:
         """
 
         return self.__clients.copy()
+
+    async def fetch_room_info(self, client: RoomClient) -> None:
+
+        await self._send_message(
+            ws=client.ws,
+            message=OperationEvent(
+                name="room_info",
+                unique_id=self._unique_id,
+                data=self.room_info
+            )
+        )
+
+    async def fetch_sub_info(self, client: RoomClient) -> None:
+
+        await self._send_message(
+            ws=client.ws,
+            message=OperationEvent(
+                name="sub_info",
+                unique_id=self._unique_id,
+                data=await self._connection.fetch_sub_info()
+            )
+        )
 
     def register_events(self) -> None:
         """
@@ -106,9 +151,10 @@ class TikTokRoom:
         async def event_forwarder(e: BaseEvent) -> None:
 
             for client in self._clients.values():
-                data: dict = json.loads(e.to_json(casing=Casing.SNAKE)) if hasattr(e, 'to_json') else dict()
+                data: dict = e.to_dict(casing=Casing.SNAKE) if hasattr(e, 'to_dict') else {}
                 name = e.get_type()
-                print('recv', data)
+
+                print('Got', name, data)
 
                 # Send the event over the WS
                 await self._send_message(
@@ -126,13 +172,19 @@ class TikTokRoom:
             if hasattr(event, 'get_type'):
                 self._connection.on(event, event_forwarder)
 
-        # Custom handler for DisconnectEvent
+        # Custom handler for Live End Event
         async def end_handler(_: Event) -> None:
             for client in self._clients.values():
                 await self.leave(client=client, end=True)
 
+        # Handler for disconnect event
+        async def disconnect_handler(_: DisconnectEvent) -> None:
+            for client in self._clients.values():
+                await self.leave(client=client, end=False)
+
         # Handle the disconnect event
-        self._connection.on(DisconnectEvent, end_handler)
+        self._connection.on(LiveEndEvent, end_handler)
+        self._connection.on(DisconnectEvent, disconnect_handler)
 
     @classmethod
     async def _send_message(cls, ws: WebSocket, message: RoomMessage) -> None:
@@ -145,14 +197,23 @@ class TikTokRoom:
 
         """
 
-        if ws.client_state != WebSocketState.CONNECTED:
+        if ws.client_state == ClientState.CLOSED:
             return
 
         json_data: str = message.model_dump_json()
-        await ws.send_text(json_data)
+        try:
+            await ws.send_text(json_data)
+        except RuntimeError as ex:
+            if "close message has been sent" in ex.args[0]:
+                print("Attempting to send message to a closed WebSocket...something is borked.")
+                ws.client_state = ClientState.CLOSED
 
     @classmethod
-    async def create(cls, unique_id: str) -> TikTokRoom:
+    async def create(
+            cls,
+            unique_id: str,
+            session_id: str | None = None
+    ) -> TikTokRoom:
         """
         Create a new room for the stream
 
@@ -167,6 +228,9 @@ class TikTokRoom:
             unique_id=unique_id
         )
 
+        if session_id:
+            client.set_session_id(session_id)
+
         # Check if live
         if not await client.is_live(unique_id=unique_id):
             raise UserOfflineError("User is not live!")
@@ -174,16 +238,20 @@ class TikTokRoom:
         # Connect the client if live
         await client.start(process_connect_events=False, fetch_room_info=True)
 
+        # Fetch sub info if session id provided
+        if session_id:
+            await client.fetch_sub_info()
+
         # Create the room
         return cls(
             unique_id=unique_id,
             connection=client
         )
 
-    async def join(
+    def join(
             self,
             ws: WebSocket
-    ) -> RoomClient:
+    ) -> tuple[RoomClient, Awaitable[None]]:
         """
         Make a WebSocket join a room
 
@@ -195,13 +263,14 @@ class TikTokRoom:
         # Create the RoomClient wrapper & return it
         client: RoomClient = RoomClient(
             ws=ws,
-            unique_id=self._unique_id
+            unique_id=self._unique_id,
+            room=self
         )
 
         self.__clients[client.id] = client
 
         # Send the join message
-        await self._send_message(
+        promise = self._send_message(
             ws=ws,
             message=ControlEvent(
                 name="join",
@@ -209,7 +278,7 @@ class TikTokRoom:
             )
         )
 
-        return client
+        return client, promise
 
     async def leave(
             self,
@@ -225,6 +294,7 @@ class TikTokRoom:
 
         """
 
+        print("LEAVING!")
         # Send the leave message
         await self._send_message(
             ws=client.ws,

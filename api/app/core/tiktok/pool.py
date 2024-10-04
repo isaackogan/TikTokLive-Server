@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import traceback
+from typing import Awaitable
 
 from starlette.websockets import WebSocket
 
@@ -16,17 +17,19 @@ class TikTokRoomPool:
 
     def __init__(
             self,
-            clean_up_interval: int
+            clean_up_interval: int,
+            session_id: str | None
     ):
         self._rooms: dict[str, TikTokRoom] = {}
         self._clean_up_task: asyncio.Task = asyncio.create_task(self._clean_up_loop(clean_up_interval))
         self._logger = get_logger()
+        self._session_id: str | None = session_id
 
     async def join(
             self,
             unique_id: str,
             ws: WebSocket
-    ) -> RoomClient:
+    ) -> tuple[RoomClient, Awaitable[None]]:
         """
         Join a room by unique_id
 
@@ -40,16 +43,19 @@ class TikTokRoomPool:
         # If the room DNE, create it
         if not self._rooms.get(unique_id):
             self._logger.info(f"Creating new room: @{unique_id}")
-            room: TikTokRoom = await TikTokRoom.create(unique_id=unique_id)
+            room: TikTokRoom = await TikTokRoom.create(unique_id=unique_id, session_id=self._session_id)
             self._rooms[unique_id] = room
 
         # Retrieve the room
         room: TikTokRoom = self._rooms[unique_id]
+        client, promise = room.join(ws=ws)
 
-        # Join the room, return the generated client
-        client = await room.join(ws=ws)
-        self._logger.info(f"Client joined room @{unique_id}: {client.id} ({room.clients} client(s))")
-        return client
+        async def join_room() -> None:
+            # Join the room
+            await promise
+            self._logger.info(f"Client joined room @{unique_id}: {client.id} ({room.clients} client(s))")
+
+        return client, join_room()
 
     async def leave(
             self,
@@ -101,7 +107,7 @@ class TikTokRoomPool:
             logging.error("Failed to kill empty room: " + traceback.format_exc())
 
         # Delete it from existence
-        self._rooms.pop(room.unique_id)
+        self._rooms.pop(room.unique_id, None)
 
     async def _clean_up_loop(self, interval: int) -> None:
         """

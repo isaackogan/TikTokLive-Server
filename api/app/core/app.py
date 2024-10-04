@@ -3,8 +3,9 @@ from contextlib import asynccontextmanager
 from typing import AsyncContextManager, Optional
 
 from fastapi import FastAPI
+from httpx._client import ClientState
 from starlette.responses import JSONResponse
-from starlette.websockets import WebSocketDisconnect, WebSocketState, WebSocket
+from starlette.websockets import WebSocketDisconnect, WebSocket
 
 from app.core import config
 from app.core.logger import get_logger
@@ -37,7 +38,8 @@ class TikTokLiveReaderAPI(FastAPI):
         """
 
         self.ws_manager = WebSocketManager(
-            clean_up_interval=config.CLEAN_UP_INTERVAL
+            clean_up_interval=config.CLEAN_UP_INTERVAL,
+            session_id=config.SESSION_ID
         )
 
         # Shutdown is after yield
@@ -77,13 +79,11 @@ async def ws_stats():
     return JSONResponse(status_code=200, content=app.ws_manager.stats)
 
 
-@app.websocket(
-    path="/ws",
-)
+@app.websocket(path="/ws")
 async def ws_endpoint(
         websocket: WebSocket,
         unique_id: str,
-        account_name: str
+        api_key: str
 ) -> None:
     """
     Create websocket connections to specific creators
@@ -92,23 +92,47 @@ async def ws_endpoint(
 
     :param websocket: The WebSocket
     :param unique_id: The unique ID of the creator
-    :param account_name: The account name to use.
+    :param api_key: The api key to use.
     :return: The websocket connection
 
     """
 
     await websocket.accept()
-    connect_data: RoomClient | None = await app.ws_manager.join(account_name=account_name, unique_id=unique_id, ws=websocket)
 
-    # Return none b/c join already handled the failure
-    if connect_data is None:
-        return
+    async def recv():
+        if websocket.client_state == ClientState.CLOSED:
+            raise WebSocketDisconnect(1000)
+        return await websocket.receive()
+
+    room_client, promise = await app.ws_manager.join(account_name=api_key, unique_id=unique_id, ws=websocket)
 
     # Loop until disconnected
     try:
-        while websocket.client_state != WebSocketState.DISCONNECTED:
-            await websocket.receive()
+
+        # Await the join promise
+        await promise
+
+        # Return none b/c join already handled the failure
+        if room_client is None:
+            return
+
+        while True:
+            received_message = await recv()
+
+            if received_message["type"] == "websocket.disconnect" or received_message["type"] == "websocket.close":
+                raise WebSocketDisconnect(1000)
+
+            if received_message["type"] != "websocket.receive":
+                continue
+
+            match received_message['text']:
+                case "operation.room_info":
+                    await room_client.room.fetch_room_info(client=room_client)
+                case "operation.sub_info":
+                    await room_client.room.fetch_sub_info(client=room_client)
+
         raise WebSocketDisconnect(1000)
-    except WebSocketDisconnect:
-        # Leave when disconnected
-        await app.ws_manager.leave(client=connect_data[0], account_name=account_name)
+    finally:
+        print("Closing State")
+        websocket.client_state = ClientState.CLOSED
+        await app.ws_manager.leave(client=room_client, account_name=api_key)
