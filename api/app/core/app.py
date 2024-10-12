@@ -50,18 +50,18 @@ class TikTokLiveReaderAPI(FastAPI):
 app: TikTokLiveReaderAPI = TikTokLiveReaderAPI()
 
 
-def api_key_query(
-        api_key: str | None = None
+def client_id_query(
+        client_id: str | None = None
 ) -> str | None:
     """
     Get the API key from the query
 
-    :param api_key: The API key
-    :return: The API key
+    :param client_id: The client ID identifying you
+    :return: The client ID identifying you
 
     """
 
-    return api_key
+    return client_id
 
 
 @app.get(
