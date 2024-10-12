@@ -7,7 +7,7 @@ from starlette.websockets import WebSocket
 
 from app.core.logger import get_logger
 from app.core.tiktok.pool import TikTokRoomPool
-from app.core.tiktok.room import RoomClient, TikTokRoom
+from app.core.tiktok.room import RoomClient
 from app.core.ws.client_store import ClientStore
 
 

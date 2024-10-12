@@ -9,7 +9,6 @@ from starlette.websockets import WebSocketDisconnect, WebSocket
 
 from app.core import config
 from app.core.logger import get_logger
-from app.core.tiktok.room import RoomClient
 from app.core.ws.ws_manager import WebSocketManager
 
 
@@ -36,6 +35,8 @@ class TikTokLiveReaderAPI(FastAPI):
         :return: Context manager for Criadex
 
         """
+
+        self.logger.info(f"Environment file load state: {config.ENV_LOADED}")
 
         self.ws_manager = WebSocketManager(
             clean_up_interval=config.CLEAN_UP_INTERVAL,
@@ -71,7 +72,6 @@ async def ws_stats():
     """
     Get the stats of the websocket connections
 
-    :param api_key: The API key
     :return: The stats
 
     """
@@ -104,18 +104,21 @@ async def ws_endpoint(
             raise WebSocketDisconnect(1000)
         return await websocket.receive()
 
+    app.logger.info(f"New WebSocket connection. Creating room...")
     room_client, promise = await app.ws_manager.join(account_name=api_key, unique_id=unique_id, ws=websocket)
+    app.logger.info(f"Room created for @{unique_id}!")
 
-    # Loop until disconnected
+    # Return none b/c join already handled the failure
+    if room_client is None:
+        return
+
     try:
 
         # Await the join promise
+        app.logger.info(f"Awaiting setup of room for @{unique_id}...")
         await promise
 
-        # Return none b/c join already handled the failure
-        if room_client is None:
-            return
-
+        # Loop until disconnected
         while True:
             received_message = await recv()
 
@@ -133,6 +136,6 @@ async def ws_endpoint(
 
         raise WebSocketDisconnect(1000)
     finally:
-        print("Closing State")
+        app.logger.info(f"Client leaving room for @{unique_id}...")
         websocket.client_state = ClientState.CLOSED
         await app.ws_manager.leave(client=room_client, account_name=api_key)

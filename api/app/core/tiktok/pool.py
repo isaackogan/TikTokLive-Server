@@ -104,7 +104,7 @@ class TikTokRoomPool:
         try:
             await room.kill()
         except:
-            logging.error("Failed to kill empty room: " + traceback.format_exc())
+            self._logger.error("Failed to kill empty room: " + traceback.format_exc())
 
         # Delete it from existence
         self._rooms.pop(room.unique_id, None)

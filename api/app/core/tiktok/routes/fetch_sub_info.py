@@ -27,6 +27,8 @@ class FetchSubInfoRoute(ClientRoute):
 
         """
 
+        self._logger.info(f"Fetching sub info for room '{room_id}' with sec_uid {sec_uid}")
+
         try:
             response: Response = await self._web.get_response(
                 url=WebDefaults.tiktok_webcast_url + "/sub/privilege/get_sub_privilege_detail",
