@@ -154,8 +154,6 @@ class TikTokRoom:
                 data: dict = e.to_dict(casing=Casing.SNAKE) if hasattr(e, 'to_dict') else {}
                 name = e.get_type()
 
-                print('Got', name, data)
-
                 # Send the event over the WS
                 await self._send_message(
                     ws=client.ws,
@@ -294,7 +292,6 @@ class TikTokRoom:
 
         """
 
-        print("LEAVING!")
         # Send the leave message
         await self._send_message(
             ws=client.ws,
