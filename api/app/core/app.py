@@ -11,6 +11,7 @@ from app.core import config
 from app.core.logger import get_logger
 from app.core.ws.ws_manager import WebSocketManager
 
+from TikTokLive.client.web.web_settings import WebDefaults
 
 class TikTokLiveReaderAPI(FastAPI):
 
@@ -38,9 +39,13 @@ class TikTokLiveReaderAPI(FastAPI):
 
         self.logger.info(f"Environment file load state: {config.ENV_LOADED}")
 
+        if config.WEBCAST_URL:
+            WebDefaults.tiktok_webcast_url = config.WEBCAST_URL
+
         self.ws_manager = WebSocketManager(
             clean_up_interval=config.CLEAN_UP_INTERVAL,
-            session_id=config.SESSION_ID
+            session_id=config.SESSION_ID,
+            authenticate_ws=config.AUTHENTICATE_WS
         )
 
         # Shutdown is after yield

@@ -210,7 +210,8 @@ class TikTokRoom:
     async def create(
             cls,
             unique_id: str,
-            session_id: str | None = None
+            session_id: str | None = None,
+            authenticate_ws: bool = False
     ) -> TikTokRoom:
         """
         Create a new room for the stream
@@ -228,6 +229,9 @@ class TikTokRoom:
 
         if session_id:
             client.set_session_id(session_id)
+
+        if authenticate_ws:
+            client._web._authenticate_websocket=True
 
         # Check if live
         if not await client.is_live(unique_id=unique_id):

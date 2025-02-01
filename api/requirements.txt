@@ -1,5 +1,5 @@
 fastapi==0.112.4
 uvicorn==0.24.0.post1
-TikTokLive==6.1.8
+TikTokLive==6.4
 python-dotenv==1.0.0
 websockets==12.0

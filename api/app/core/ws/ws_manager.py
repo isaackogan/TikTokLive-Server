@@ -21,7 +21,8 @@ class WebSocketManager:
     def __init__(
             self,
             clean_up_interval: int,
-            session_id: str | None
+            session_id: str | None,
+            authenticate_ws: bool = False
     ):
         # Map<account_id, ChatSocketClient[]>
         self._clients: ClientStore = ClientStore()
@@ -33,7 +34,8 @@ class WebSocketManager:
         # Create the pool
         self._pool: TikTokRoomPool = TikTokRoomPool(
             clean_up_interval=clean_up_interval,
-            session_id=session_id
+            session_id=session_id,
+            authenticate_ws=authenticate_ws
         )
 
     async def join(
