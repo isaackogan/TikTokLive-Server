@@ -14,4 +14,5 @@ CLEAN_UP_INTERVAL: int = int(os.environ.get('CLEAN_UP_INTERVAL', '60'))
 _proxy_fp = os.environ.get('PROXY_FP')
 PROXIES: List[str] = json.loads(open(_proxy_fp, "r").read()) if _proxy_fp else []
 SESSION_ID: str | None = os.environ.get('TIKTOK_SESSION_ID', None)
-
+AUTHENTICATE_WS: bool = os.environ.get('AUTHENTICATE_WEBSOCKET', 'false').lower() == 'true'
+WEBCAST_URL: str | None = os.environ.get('TIKTOK_WEBCAST_URL', None)

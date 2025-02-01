@@ -18,12 +18,14 @@ class TikTokRoomPool:
     def __init__(
             self,
             clean_up_interval: int,
-            session_id: str | None
+            session_id: str | None,
+            authenticate_ws: bool = False
     ):
         self._rooms: dict[str, TikTokRoom] = {}
         self._clean_up_task: asyncio.Task = asyncio.create_task(self._clean_up_loop(clean_up_interval))
         self._logger = get_logger()
         self._session_id: str | None = session_id
+        self._authenticate_ws: bool = authenticate_ws
 
     async def join(
             self,
@@ -43,7 +45,7 @@ class TikTokRoomPool:
         # If the room DNE, create it
         if not self._rooms.get(unique_id):
             self._logger.info(f"Creating new room: @{unique_id}")
-            room: TikTokRoom = await TikTokRoom.create(unique_id=unique_id, session_id=self._session_id)
+            room: TikTokRoom = await TikTokRoom.create(unique_id=unique_id, session_id=self._session_id, authenticate_ws=self._authenticate_ws)
             self._rooms[unique_id] = room
 
         # Retrieve the room
